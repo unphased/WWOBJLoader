@@ -336,6 +336,7 @@ THREE.OBJLoader2 = (function () {
 			this.materialPerSmoothingGroup = false;
 			this.useIndices = false;
 			this.disregardNormals = false;
+			this.faceType = -1;
 
 			this.inputObjectCount = 1;
 			this.outputObjectCount = 1;
@@ -563,7 +564,55 @@ THREE.OBJLoader2 = (function () {
 					break;
 
 				case Consts.LINE_F:
-					this.rawMesh.processFaces( buffer, bufferPointer, countSlashes( slashSpacePattern, slashSpacePatternPointer ) );
+					var slashesCount = countSlashes( slashSpacePattern, slashSpacePatternPointer );
+					var bufferLength = bufferPointer - 1;
+
+					// "f vertex ..."
+					if ( slashesCount === 0 ) {
+
+						if ( this.faceType !== 0 ) {
+
+							this.processCompletedMesh( currentByte );
+							this.faceType = 0;
+							this.rawMesh.verifyIndex( this.faceType );
+
+						}
+
+						// "f vertex/uv ..."
+					} else if  ( bufferLength === slashesCount * 2 ) {
+
+						if ( this.faceType !== 1 ) {
+
+							this.processCompletedMesh( currentByte );
+							this.faceType = 1;
+							this.rawMesh.verifyIndex( this.faceType );
+
+						}
+
+						// "f vertex/uv/normal ..."
+					} else if  ( bufferLength * 2 === slashesCount * 3 ) {
+
+						if ( this.faceType !== 2 ) {
+
+							this.processCompletedMesh( currentByte );
+							this.faceType = 2;
+							this.rawMesh.verifyIndex( this.faceType );
+
+						}
+
+						// "f vertex//normal ..."
+					} else {
+
+						if ( this.faceType !== 3 ) {
+
+							this.processCompletedMesh( currentByte );
+							this.faceType = 3;
+							this.rawMesh.verifyIndex( this.faceType );
+
+						}
+
+					}
+					this.rawMesh.processFaces( buffer, bufferLength, this.faceType );
 					break;
 
 				case Consts.LINE_L:
@@ -806,9 +855,11 @@ THREE.OBJLoader2 = (function () {
 					var materialIndexLine = Validator.isValid( selectedMaterialIndex ) ? '\n\t\tmaterialIndex: ' + selectedMaterialIndex : '';
 					var createdReport = 'Output Object no.: ' + this.outputObjectCount +
 						'\n\t\tgroupName: ' + rawObjectDescription.groupName +
-						materialIndexLine +
+						'\n\t\tIndex: ' + rawObjectDescription.index +
+						'\n\t\tfaceType: ' + rawObjectDescription.faceType +
 						'\n\t\tmaterialName: ' + rawObjectDescription.materialName +
 						'\n\t\tsmoothingGroup: ' + rawObjectDescription.smoothingGroup +
+						materialIndexLine +
 						'\n\t\tobjectName: ' + rawObjectDescription.objectName +
 						'\n\t\t#vertices: ' + rawObjectDescription.vertices.length / 3 +
 						'\n\t\t#indices: ' + rawObjectDescription.indices.length +
@@ -936,7 +987,7 @@ THREE.OBJLoader2 = (function () {
 			this.activeMtlName = mtlName;
 			this.mtlCount++;
 
-			this.verifyIndex();
+			this.verifyIndex( -1 );
 		};
 
 		RawMesh.prototype.pushSmoothingGroup = function ( smoothingGroup ) {
@@ -952,28 +1003,27 @@ THREE.OBJLoader2 = (function () {
 			if ( smoothCheck !== smoothingGroupInt ) {
 
 				this.smoothingGroupCount++;
-				this.verifyIndex();
+				this.verifyIndex( -1 );
 
 			}
 		};
 
-		RawMesh.prototype.verifyIndex = function () {
-			var index = this.activeMtlName + '|' + this.smoothingGroup.normalized;
+		RawMesh.prototype.verifyIndex = function ( faceType ) {
+			var index = faceType + '|' + this.activeMtlName + '|' + this.smoothingGroup.normalized;
 			this.subGroupInUse = this.subGroups[ index ];
 			if ( ! Validator.isValid( this.subGroupInUse ) ) {
 
-				this.subGroupInUse = new RawMeshSubGroup( this.objectName, this.groupName, this.activeMtlName, this.smoothingGroup.normalized );
+				this.subGroupInUse = new RawMeshSubGroup( index, this.objectName, this.groupName, this.activeMtlName, this.smoothingGroup.normalized, faceType );
 				this.subGroups[ index ] = this.subGroupInUse;
 
 			}
 		};
 
-		RawMesh.prototype.processFaces = function ( buffer, bufferPointer, slashesCount ) {
-			var bufferLength = bufferPointer - 1;
+		RawMesh.prototype.processFaces = function ( buffer, bufferLength, faceType ) {
 			var i, length;
 
 			// "f vertex ..."
-			if ( slashesCount === 0 ) {
+			if ( faceType === 0 ) {
 
 				for ( i = 2, length = bufferLength; i < length; i ++ ) {
 
@@ -984,7 +1034,7 @@ THREE.OBJLoader2 = (function () {
 				}
 
 				// "f vertex/uv ..."
-			} else if  ( bufferLength === slashesCount * 2 ) {
+			} else if  ( faceType === 1 ) {
 
 				for ( i = 3, length = bufferLength - 2; i < length; i += 2 ) {
 
@@ -995,7 +1045,7 @@ THREE.OBJLoader2 = (function () {
 				}
 
 				// "f vertex/uv/normal ..."
-			} else if  ( bufferLength * 2 === slashesCount * 3 ) {
+			} else if  ( faceType === 2 ) {
 
 				for ( i = 4, length = bufferLength - 3; i < length; i += 3 ) {
 
@@ -1206,11 +1256,13 @@ THREE.OBJLoader2 = (function () {
 	 */
 	var RawMeshSubGroup = (function () {
 
-		function RawMeshSubGroup( objectName, groupName, materialName, smoothingGroup ) {
+		function RawMeshSubGroup( index, objectName, groupName, materialName, smoothingGroup, faceType ) {
+			this.index = index;
 			this.objectName = objectName;
 			this.groupName = groupName;
 			this.materialName = materialName;
 			this.smoothingGroup = smoothingGroup;
+			this.faceType = faceType;
 			this._init();
 		}
 
